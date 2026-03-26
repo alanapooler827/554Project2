@@ -109,20 +109,22 @@ class SparkDataCheck:
     
     def summarize_min_max(self, column = None, group_col = None):
         
+        # get column types from data frame
+        type_dict = dict(self.df.dtypes)
+        # define numeric column types
+        numeric_types = ('float', 'int', 'longint', 'bigint', 'double', 'integer')
+        
         # check if numeric column is provided
         if column is not None:
             
-            # get column and define numeric column types
-            col_type = dict(self.df.dtypes)[column]
-            numeric_types = ('float', 'int', 'longint', 'bigint', 'double', 'integer')
-            
             # if not numeric, print message and return unmodified df
-            if col_type not in numeric_types:
+            if type_dict.get(column) not in numeric_types:
                 print('Error: Column must of type float, int, longint, bigint, double, or integer')
                 return self
             
             # if numeric column is provided, find min and max
             if group_col is None:
+                # use .alias() to name new columns according to provided column
                 result_df = self.df.agg(
                     F.min(column).alias(f"{column}_min"), 
                     F.max(column).alias(f"{column}_max")
@@ -140,7 +142,7 @@ class SparkDataCheck:
         
         # if column is not provided, summarize all numeric columns
         numeric_cols = [
-            col_name for col_name in self.df.columns if dtype_dict.get(col_name) in numeric_types
+            col_name for col_name in self.df.columns if type_dict.get(col_name) in numeric_types
         ]
         
         # find min and max for all numeric columns without grouping column
@@ -168,5 +170,5 @@ class SparkDataCheck:
             df_list.append(min_max_df)
         
         # reduce result into one data frame
-        result = reduce(lambda left, right: pd.merge(left, right, on=group_col), df_list)
-        return result
+        result_df = reduce(lambda left, right: pd.merge(left, right, on=group_col), df_list)
+        return result_df
