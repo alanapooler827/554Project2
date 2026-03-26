@@ -41,38 +41,37 @@ class SparkDataCheck:
     def check_numeric_col(
         self,
         column,
-        lower,
-        upper
+        lower = None,
+        upper = None
     ):
         
         # check that upper and/or lower bounds are provided
         if lower is None and upper is None:
             print("Error: Must provide at least one of 'upper' or 'lower'")
+            return self
         
         # check that column type is numeric
-        col_type = dict(self.df.dtypes)['column']
+        col_type = dict(self.df.dtypes)[column]
+        
         # if not numeric, print message and return unmodified df
         if col_type not in ('float', 'int', 'longint', 'bigint', 'double', 'integer'):
             print('Error: Column must of type float, int, longint, bigint, double, or integer')
             return self
         
-        # turn provided column into pyspark column object
-        chk_col = F.col(column)
-        
         # check if column is within provided range
         if lower is not None and upper is not None:
-            chk = chk_col.between(lower, upper)
+            chk = F.col(column).between(lower, upper)
         elif lower is not None:
-            chk = chk_col >= lower
+            chk = F.col(column) >= lower
         else:
-            chk = chk_col <= upper
+            chk = F.col(column) <= upper
 
         # add new column to dataframe
         # if provided column is null, return null
         self.df = self.df.withColumn(
             'within_num_range',
-            F.when(chk_col.isNull(), F.lit(None))
-            .otherwise(chk_col)
+            F.when(F.col(column).isNull(), F.lit(None))
+            .otherwise(chk)
         )
         
         # return new data frame
@@ -82,20 +81,17 @@ class SparkDataCheck:
     def check_string_col(self, column, levels):
 
         # check that column is string type
-        col_type = dict(self.df.dtypes)['column']
+        col_type = dict(self.df.dtypes)[column]
         if col_type != 'string':
             print('Error: Column type must be string.')
             return self
-        
-        # turn provided column into pyspark column object
-        chk_col = F.col(column)
 
         # add new column to dataframe
         # if column is null, return null
         self.df = self.df.withColumn(
             'within_level',
-            F.when(chk_col.isNull(), F.lit(None))
-            .otherwise(chk_col.isin(levels))
+            F.when(F.col(column).isNull(), F.lit(None))
+            .otherwise(F.col(column).isin(levels))
         )
 
         return self
@@ -110,3 +106,67 @@ class SparkDataCheck:
         )
 
         return self
+    
+    def summarize_min_max(self, column = None, group_col = None):
+        
+        # check if numeric column is provided
+        if column is not None:
+            
+            # get column and define numeric column types
+            col_type = dict(self.df.dtypes)[column]
+            numeric_types = ('float', 'int', 'longint', 'bigint', 'double', 'integer')
+            
+            # if not numeric, print message and return unmodified df
+            if col_type not in numeric_types:
+                print('Error: Column must of type float, int, longint, bigint, double, or integer')
+                return self
+            
+            # if numeric column is provided, find min and max
+            if group_col is None:
+                result_df = self.df.agg(
+                    F.min(column).alias(f"{column}_min"), 
+                    F.max(column).alias(f"{column}_max")
+                )
+            
+            # if numeric column is provided, find min and max with grouping column
+            else:
+                result_df = self.df.groupBy(group_col).agg(
+                    F.min(column).alias(f"{column}_max"),
+                    F.max(column).alias(f"{column}_max")
+                )
+            
+            # return result as pandas dataframe
+            return result_df.toPandas()
+        
+        # if column is not provided, summarize all numeric columns
+        numeric_cols = [
+            col_name for col_name in self.df.columns if dtype_dict.get(col_name) in numeric_types
+        ]
+        
+        # find min and max for all numeric columns without grouping column
+        if group_col is None:
+            agg_exprs = []
+            for col_name in numeric_cols:
+                agg_exprs.extend([
+                    F.min(F.col(col_name)).alias(f"{col_name}_min"),
+                    F.max(F.col(col_name)).alias(f"{col_name}_max")
+                ])
+
+            return self.df.agg(*agg_exprs).toPandas()
+    
+        # find min and max for all numeric columns with grouping column
+        df_list = []
+        for col_name in numeric_cols:
+            min_max_df = (
+                self.df.groupBy(group_col)
+                .agg(
+                    F.min(F.col(col_name)).alias(f"{col_name}_min"),
+                    F.max(F.col(col_name)).alias(f"{col_name}_max")
+                )
+                .toPandas()
+            )
+            df_list.append(min_max_df)
+        
+        # reduce result into one data frame
+        result = reduce(lambda left, right: pd.merge(left, right, on=group_col), df_list)
+        return result
