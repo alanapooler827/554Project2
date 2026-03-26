@@ -172,3 +172,41 @@ class SparkDataCheck:
         # reduce result into one data frame
         result_df = reduce(lambda left, right: pd.merge(left, right, on=group_col), df_list)
         return result_df
+    
+    
+    def get_value_counts(self, column1, column2 = None):
+        
+        # get column types from data frame
+        type_dict = dict(self.df.dtypes)
+        
+        # check first column is string
+        if type_dict.get(column1) != 'string':
+            print('Error: Column must be a string column')
+            return None
+        
+        # check second column is string if provided
+        if column2 is not None and type_dict.get(column2) != 'string':
+            print('Error: Columns must be a string column')
+            return None
+        
+        # get counts for one or two columns
+        # one column
+        if column2 is None:
+            result_df = (
+                self.df
+                .groupBy(column1)
+                .count()
+                .orderBy(F.col('count').desc())
+            )
+        
+        # two columns  
+        else:
+            result_df = (
+                self.df
+                .groupBy(column1, column2)
+                .count()
+                .orderBy(F.col('count').desc())
+            )
+        
+        # return resulting data frame
+        return result_df.toPandas()
